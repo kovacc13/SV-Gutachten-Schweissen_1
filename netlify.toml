@@ -1,0 +1,75 @@
+# Netlify Konfiguration für SchweißApp
+
+[build]
+  publish = "public"
+  functions = "netlify/functions"
+
+# Redirects: /api/* -> /.netlify/functions/*
+[[redirects]]
+  from = "/api/gutachten"
+  to = "/.netlify/functions/gutachten"
+  status = 200
+
+[[redirects]]
+  from = "/api/gutachten/:id"
+  to = "/.netlify/functions/update-status"
+  status = 200
+
+[[redirects]]
+  from = "/api/dashboard"
+  to = "/.netlify/functions/dashboard"
+  status = 200
+
+[[redirects]]
+  from = "/api/analyze"
+  to = "/.netlify/functions/analyze"
+  status = 200
+
+[[redirects]]
+  from = "/api/upload-image"
+  to = "/.netlify/functions/upload-image"
+  status = 200
+
+[[redirects]]
+  from = "/api/health"
+  to = "/.netlify/functions/health"
+  status = 200
+
+# SPA Fallback
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Headers für Caching
+[[headers]]
+  for = "/api/*"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+    Access-Control-Allow-Origin = "*"
+
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/*.js"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000"
+
+[[headers]]
+  for = "/*.css"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000"
+
+# Functions Konfiguration
+[functions]
+  node_bundler = "esbuild"
+  
+  # Timeout für Bildanalyse erhöhen (max 26 Sekunden bei Free Tier)
+  [functions."analyze"]
+    timeout = 26
+  
+  [functions."upload-image"]
+    timeout = 26
