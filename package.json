@@ -1,22 +1,17 @@
 {
-  "name": "schweissapp-netlify",
-  "version": "8.1.0",
-  "description": "SV Gutachten Schweißtechnik - Netlify Serverless Version",
+  "name": "schweissapp-v10-netlify",
+  "version": "10.0.0",
+  "description": "SV Gutachten Schweißtechnik - Netlify Edition",
   "scripts": {
     "dev": "netlify dev",
-    "build": "echo 'No build required'",
+    "build": "echo 'Static site - no build needed'",
     "deploy": "netlify deploy --prod"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.24.3",
-    "@notionhq/client": "^2.3.0",
-    "busboy": "^1.6.0",
-    "cloudinary": "^1.41.3"
+    "@anthropic-ai/sdk": "^0.39.0"
   },
   "devDependencies": {
+    "@netlify/functions": "^2.8.0",
     "netlify-cli": "^17.0.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
   }
 }
