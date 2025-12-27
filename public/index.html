@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SV Gutachten Schweißtechnik v10.2</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/docx@8.5.0/build/index.umd.js"></script>
+  <script src="https://unpkg.com/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Segoe UI',system-ui,sans-serif;background:linear-gradient(135deg,#0f172a,#1e293b,#0f172a);min-height:100vh;color:#e2e8f0}
+    .glass{background:rgba(255,255,255,0.05);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,0.1);border-radius:16px}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @keyframes glow{0%,100%{box-shadow:0 0 20px rgba(249,115,22,0.3)}50%{box-shadow:0 0 40px rgba(249,115,22,0.6)}}
+    .loading{display:inline-block;width:20px;height:20px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}
+    .btn-premium{background:linear-gradient(135deg,#f97316,#ea580c);border:none;color:#fff;font-weight:600;cursor:pointer;transition:all 0.3s;box-shadow:0 4px 15px rgba(249,115,22,0.4);border-radius:12px}
+    .btn-premium:hover{transform:translateY(-2px);box-shadow:0 8px 25px rgba(249,115,22,0.5)}
+    .btn-premium:disabled{opacity:0.5;cursor:not-allowed;transform:none}
+    .status-bestanden{background:rgba(34,197,94,0.2);border:1px solid rgba(34,197,94,0.5);color:#4ade80}
+    .status-nacharbeit{background:rgba(245,158,11,0.2);border:1px solid rgba(245,158,11,0.5);color:#fbbf24}
+    .status-nichtbestanden{background:rgba(239,68,68,0.2);border:1px solid rgba(239,68,68,0.5);color:#f87171}
+    input,select{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:#e2e8f0;border-radius:8px;padding:10px 12px}
+    input:focus,select:focus{outline:none;border-color:#f97316;box-shadow:0 0 0 3px rgba(249,115,22,0.2)}
+    select option{background:#1e293b}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const{useState,useEffect,useRef}=React;
+
+function App(){
+  const[apiStatus,setApiStatus]=useState({anthropic:false,notion:false,cloudinary:false});
+  const[selectedImages,setSelectedImages]=useState([]);
+  const[imagePreviews,setImagePreviews]=useState([]);
+  const[analyzing,setAnalyzing]=useState(false);
+  const[saving,setSaving]=useState(false);
+  const[analysisResult,setAnalysisResult]=useState(null);
+  const[saveResult,setSaveResult]=useState(null);
+  const fileInputRef=useRef(null);
+  const[protokoll,setProtokoll]=useState({auftragsnummer:"",pruefgegenstand:"",auftraggeber:"",werkstoff:"S355",bewertungsgruppe:"C",wanddicke:""});
+
+  useEffect(()=>{
+    fetch('/api/health').then(r=>r.json()).then(d=>setApiStatus({anthropic:d.anthropic||false,notion:d.notion||false,cloudinary:d.cloudinary||false})).catch(()=>{});
+  },[]);
+
+  const handleImageSelect=(e)=>{
+    const files=Array.from(e.target.files).slice(0,4);
+    setSelectedImages(files);
+    setImagePreviews(files.map(f=>URL.createObjectURL(f)));
+    setAnalysisResult(null);
+    setSaveResult(null);
+  };
+
+  const analyzeImages=async()=>{
+    if(!selectedImages.length)return;
+    setAnalyzing(true);
+    try{
+      const formData=new FormData();
+      selectedImages.forEach(img=>formData.append('images',img));
+      formData.append('werkstoff',protokoll.werkstoff);
+      formData.append('bewertungsgruppe',protokoll.bewertungsgruppe);
+      formData.append('wanddicke',protokoll.wanddicke);
+      const response=await fetch('/api/analyze',{method:'POST',body:formData});
+      const data=await response.json();
+      if(data.success){
+        setAnalysisResult(data.analysis);
+        setProtokoll(p=>({...p,anamnese:data.analysis.anamnese,diagnose:data.analysis.diagnose,conclusio:data.analysis.conclusio,status:data.analysis.status}));
+      }else{alert('Fehler: '+data.error)}
+    }catch(e){alert('Fehler: '+e.message)}
+    setAnalyzing(false);
+  };
+
+  const saveToNotion=async()=>{
+    if(!analysisResult){alert('Bitte zuerst analysieren');return}
+    setSaving(true);
+    try{
+      const uploadFormData=new FormData();
+      selectedImages.forEach(img=>uploadFormData.append('images',img));
+      const uploadResponse=await fetch('/api/upload-images',{method:'POST',body:uploadFormData});
+      const uploadData=await uploadResponse.json();
+      if(!uploadData.success)throw new Error(uploadData.error);
+
+      const gutachtenData={
+        auftragsnummer:protokoll.auftragsnummer||`GA-${Date.now()}`,
+        pruefgegenstand:protokoll.pruefgegenstand,
+        auftraggeber:protokoll.auftraggeber,
+        werkstoff:protokoll.werkstoff,
+        bewertungsgruppe:protokoll.bewertungsgruppe,
+        wanddicke:protokoll.wanddicke,
+        anamnese:analysisResult.anamnese,
+        diagnose:analysisResult.diagnose,
+        conclusio:analysisResult.conclusio,
+        status:analysisResult.status,
+        fotoUrls:uploadData.imageUrls
+      };
+      const saveResponse=await fetch('/api/save-gutachten',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(gutachtenData)});
+      const saveData=await saveResponse.json();
+      if(saveData.success){setSaveResult({success:true,url:saveData.url,imageCount:uploadData.imageUrls.length})}
+      else{throw new Error(saveData.error)}
+    }catch(e){setSaveResult({success:false,error:e.message})}
+    setSaving(false);
+  };
+
+  const getStatusClass=(s)=>s?.toLowerCase()==='bestanden'?'status-bestanden':s?.toLowerCase()==='nacharbeit'?'status-nacharbeit':'status-nichtbestanden';
+
+  return(
+    <div style={{minHeight:"100vh"}}>
+      <header style={{background:"rgba(0,0,0,0.4)",padding:"16px 24px",borderBottom:"1px solid rgba(249,115,22,0.3)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",maxWidth:"1200px",margin:"0 auto"}}>
+          <div style={{display:"flex",alignItems:"center",gap:"16px"}}>
+            <div style={{background:"linear-gradient(135deg,#f97316,#ea580c)",padding:"14px",borderRadius:"16px"}}>🔥</div>
+            <div>
+              <h1 style={{fontSize:"22px",fontWeight:700,margin:0}}>SV Gutachten Schweißtechnik</h1>
+              <p style={{color:"#f97316",fontSize:"12px",margin:"4px 0 0"}}>v10.2 · Claude Vision · ISO 15614-1</p>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:"12px"}}>
+            {[{l:"Claude",a:apiStatus.anthropic},{l:"Notion",a:apiStatus.notion},{l:"Cloud",a:apiStatus.cloudinary}].map((s,i)=>(
+              <span key={i} style={{background:s.a?"rgba(34,197,94,0.15)":"rgba(239,68,68,0.15)",border:"1px solid "+(s.a?"rgba(34,197,94,0.5)":"rgba(239,68,68,0.5)"),color:s.a?"#4ade80":"#f87171",padding:"6px 12px",borderRadius:"8px",fontSize:"11px"}}>{s.l}: {s.a?"✓":"✗"}</span>
+            ))}
+          </div>
+        </div>
+      </header>
+
+      <main style={{padding:"32px 24px",maxWidth:"1200px",margin:"0 auto",display:"grid",gridTemplateColumns:"1fr 1fr",gap:"24px"}}>
+        <div>
+          <div className="glass" style={{padding:"28px",marginBottom:"24px"}}>
+            <h3 style={{margin:"0 0 20px",fontSize:"18px"}}>📷 Schweißnaht-Fotos (bis zu 4)</h3>
+            <input type="file" ref={fileInputRef} accept="image/*" multiple onChange={handleImageSelect} style={{display:"none"}}/>
+            {imagePreviews.length>0&&(
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px",marginBottom:"20px"}}>
+                {imagePreviews.map((p,i)=>(
+                  <div key={i} style={{borderRadius:"12px",overflow:"hidden",border:"2px solid rgba(255,255,255,0.1)"}}>
+                    <img src={p} alt={"Foto "+(i+1)} style={{width:"100%",height:"120px",objectFit:"cover"}}/>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div onClick={()=>fileInputRef.current?.click()} style={{border:"2px dashed rgba(249,115,22,0.4)",borderRadius:"16px",padding:"40px",textAlign:"center",cursor:"pointer",background:"rgba(249,115,22,0.05)"}}>
+              <span style={{fontSize:"48px"}}>📷</span>
+              <p style={{color:"rgba(255,255,255,0.7)",marginTop:"12px"}}>{selectedImages.length?`${selectedImages.length} Foto(s) ausgewählt`:"Fotos hochladen"}</p>
+            </div>
+            <button onClick={analyzeImages} disabled={!selectedImages.length||analyzing} className="btn-premium" style={{width:"100%",marginTop:"20px",padding:"16px",fontSize:"16px"}}>
+              {analyzing?<><span className="loading"></span> Analysiere...</>:`🤖 ${selectedImages.length} Foto(s) analysieren`}
+            </button>
+          </div>
+
+          <div className="glass" style={{padding:"28px"}}>
+            <h3 style={{margin:"0 0 20px",fontSize:"18px"}}>⚙️ Einstellungen</h3>
+            <div style={{marginBottom:"16px"}}>
+              <label style={{fontSize:"13px",color:"rgba(255,255,255,0.7)",display:"block",marginBottom:"8px"}}>Werkstoff</label>
+              <select value={protokoll.werkstoff} onChange={e=>setProtokoll({...protokoll,werkstoff:e.target.value})} style={{width:"100%"}}>
+                {["S235","S275","S355","S355J2+N","S460","S690","1.4301","1.4571","1.4462"].map(w=><option key={w} value={w}>{w}</option>)}
+              </select>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"16px"}}>
+              <div>
+                <label style={{fontSize:"13px",color:"rgba(255,255,255,0.7)",display:"block",marginBottom:"8px"}}>Wanddicke (mm)</label>
+                <input type="number" value={protokoll.wanddicke} onChange={e=>setProtokoll({...protokoll,wanddicke:e.target.value})} placeholder="z.B. 12" style={{width:"100%"}}/>
+              </div>
+              <div>
+                <label style={{fontSize:"13px",color:"rgba(255,255,255,0.7)",display:"block",marginBottom:"8px"}}>Bewertungsgruppe</label>
+                <div style={{display:"flex",gap:"8px"}}>
+                  {["B","C","D"].map(g=>(
+                    <button key={g} onClick={()=>setProtokoll({...protokoll,bewertungsgruppe:g})} style={{flex:1,padding:"10px",borderRadius:"8px",fontWeight:600,background:protokoll.bewertungsgruppe===g?"linear-gradient(135deg,#f97316,#ea580c)":"rgba(255,255,255,0.08)",color:protokoll.bewertungsgruppe===g?"#fff":"rgba(255,255,255,0.7)",border:"none",cursor:"pointer"}}>{g}</button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="glass" style={{padding:"28px"}}>
+          <h3 style={{margin:"0 0 24px",fontSize:"18px"}}>📋 KI-Analyse-Ergebnis</h3>
+          {analysisResult?(
+            <>
+              <div className={getStatusClass(analysisResult.status)} style={{borderRadius:"16px",padding:"20px",marginBottom:"24px",textAlign:"center"}}>
+                <span style={{fontSize:"24px",fontWeight:700}}>{analysisResult.status==='Bestanden'?'✓ BESTANDEN':analysisResult.status==='Nacharbeit'?'⚠ NACHARBEIT':'✗ NICHT BESTANDEN'}</span>
+              </div>
+              {[{t:'ANAMNESE',c:analysisResult.anamnese,col:'#3b82f6'},{t:'DIAGNOSE',c:analysisResult.diagnose,col:'#f97316'},{t:'CONCLUSIO',c:analysisResult.conclusio,col:'#22c55e'}].map((s,i)=>(
+                <div key={i} style={{marginBottom:"20px"}}>
+                  <h4 style={{fontSize:"13px",color:s.col,margin:"0 0 10px",fontWeight:600}}>{s.t}</h4>
+                  <div style={{fontSize:"12px",lineHeight:"1.6",whiteSpace:"pre-wrap",background:"rgba(0,0,0,0.3)",padding:"16px",borderRadius:"10px",borderLeft:"3px solid "+s.col,maxHeight:"150px",overflowY:"auto"}}>{s.c||'Keine Daten'}</div>
+                </div>
+              ))}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px",marginTop:"24px"}}>
+                <button onClick={saveToNotion} disabled={saving} className="btn-premium" style={{padding:"14px",background:"linear-gradient(135deg,#000,#1a1a2e)",border:"1px solid rgba(255,255,255,0.2)"}}>
+                  {saving?<><span className="loading"></span> Speichern...</>:"💾 In Notion speichern"}
+                </button>
+                <button className="btn-premium" style={{padding:"14px"}}>📄 DOCX Export</button>
+              </div>
+              {saveResult&&(
+                <div style={{marginTop:"16px",padding:"16px",borderRadius:"10px",background:saveResult.success?"rgba(34,197,94,0.15)":"rgba(239,68,68,0.15)",border:"1px solid "+(saveResult.success?"rgba(34,197,94,0.5)":"rgba(239,68,68,0.5)")}}>
+                  {saveResult.success?(
+                    <div>
+                      <p style={{margin:"0 0 8px",color:"#4ade80",fontWeight:600}}>✓ In Notion gespeichert!</p>
+                      <p style={{margin:0,fontSize:"12px",color:"rgba(255,255,255,0.7)"}}>{saveResult.imageCount} Foto(s) hochgeladen</p>
+                      {saveResult.url&&<a href={saveResult.url} target="_blank" rel="noopener noreferrer" style={{display:"inline-block",marginTop:"12px",padding:"8px 16px",background:"rgba(0,0,0,0.3)",color:"#fff",borderRadius:"6px",fontSize:"12px",textDecoration:"none"}}>🔗 In Notion öffnen →</a>}
+                    </div>
+                  ):<p style={{margin:0,color:"#f87171"}}>✗ Fehler: {saveResult.error}</p>}
+                </div>
+              )}
+            </>
+          ):(
+            <div style={{textAlign:"center",padding:"80px 20px",color:"rgba(255,255,255,0.5)"}}>
+              <span style={{fontSize:"80px",opacity:0.3}}>🤖</span>
+              <p style={{marginTop:"24px",fontSize:"16px"}}>Lade Schweißnaht-Fotos hoch</p>
+              <p style={{fontSize:"13px",marginTop:"8px"}}>Claude Vision analysiert nach ISO 5817</p>
+            </div>
+          )}
+        </div>
+      </main>
+
+      <footer style={{padding:"24px",background:"rgba(0,0,0,0.4)",marginTop:"48px",borderTop:"1px solid rgba(249,115,22,0.3)",textAlign:"center"}}>
+        <p style={{fontSize:"12px",color:"rgba(255,255,255,0.4)"}}>SV Gutachten v10.2 | Claude Vision | ISO 15614-1, ISO 5817 | © 2025</p>
+      </footer>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
